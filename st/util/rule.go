@@ -88,6 +88,33 @@ func KeyExists(ruleI interface{}, key string) bool {
 	return ok
 }
 
+
+func ParseArray(ruleI interface{}, key string) ([]interface{}, error) {
+	var val []interface{}
+
+	rule := ruleI.(map[string]interface{})
+	var ok bool
+	foundRule, ok := rule[key]
+	if !ok {
+		return val, errors.New("Path was not in rule")
+	}
+
+	switch v := foundRule.(type) {
+	case []interface{}:
+		val = v
+	case []string:
+		val = make([]interface{}, len(v))
+		for i, vi := range v {
+			val[i] = vi
+		}
+	case nil:
+		val = make([]interface{}, 0)
+	default:
+		return val, errors.New("Supplied value was not an array of interfaces")
+	}
+	return val, nil
+}
+
 func ParseArrayString(ruleI interface{}, key string) ([]string, error) {
 	var val []string
 

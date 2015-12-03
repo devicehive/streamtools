@@ -124,7 +124,7 @@ type dbusConn struct {
 	exclusive bool
 
 	matchRules map[string]bool
-	signals chan *dbus.Signal
+	signals    chan *dbus.Signal
 }
 
 // create new D-Bus helper connection

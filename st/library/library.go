@@ -51,6 +51,7 @@ var Blocks = map[string]func() blocks.BlockInterface{
 	"timeseries":         NewTimeseries,
 	"toamqp":             NewToAMQP,
 	"tobeanstalkd":       NewToBeanstalkd,
+	"toDBus":             NewToDBus,
 	"toelasticsearch":    NewToElasticsearch,
 	"toemail":            NewToEmail,
 	"tofile":             NewToFile,

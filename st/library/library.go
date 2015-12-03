@@ -16,6 +16,7 @@ var Blocks = map[string]func() blocks.BlockInterface{
 	"filter":             NewFilter,
 	"fromamqp":           NewFromAMQP,
 	"fromemail":          NewFromEmail,
+	"fromDBus":           NewFromDBus,
 	"fromfile":           NewFromFile,
 	"fromHTTPGetRequest": NewFromHTTPGetRequest,
 	"fromhttpstream":     NewFromHTTPStream,

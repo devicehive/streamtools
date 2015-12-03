@@ -1,7 +1,6 @@
 package library
 
 import (
-	//	"encoding/json"
 	"strings"
 
 	"github.com/godbus/dbus"
@@ -35,43 +34,60 @@ func (b *FromDBus) Setup() {
 
 // Run is the block's main loop. Here we listen on the different channels we set up.
 func (b *FromDBus) Run() {
-	var conn *dbus.Conn
-	var connNeedClose bool
-	var sigch chan *dbus.Signal
-	var address = "system"
-	var filter = "type='signal',sender='*'"
-	var err error
+	var conn = newDBusConn()
+	var address = "@system"
+	var filter = "type='signal',sender='org.freedesktop.DBus'"
 
 	for {
 		select {
 		// set parameters of the block
-		case msgI := <-b.inrule:
+		case msg := <-b.inrule:
 			// address - bus name
-			address, err = util.ParseString(msgI, "BusName")
+			newAddress, err := util.ParseString(msg, "BusName")
 			if err != nil {
 				b.Error(err)
 				continue
 			}
 
-			// match filter
-			filter, err = util.ParseString(msgI, "Filter")
+			// filter - match rule
+			newFilter, err := util.ParseString(msg, "Filter")
 			if err != nil {
 				b.Error(err)
 				continue
 			}
 
 			// open connection
-			if conn != nil && connNeedClose {
-				conn.Close() // TODO: report possible errors?
-				conn = nil
+			connCreated := false
+			if !conn.isOpen() || address != newAddress {
+				// close previous if need
+				if conn.isOpen() {
+					// TODO: report possible errors?
+					conn.removeAllMatchRules(true)
+					conn.close()
+				}
+
+				// try to open new
+				err = conn.open(newAddress)
+				if err != nil {
+					b.Error(err)
+					continue
+				}
+
+				address = newAddress // changed
+				connCreated = true
 			}
-			conn, connNeedClose, err = openConn(address, filter)
-			if err != nil {
-				b.Error(err)
-				continue
+
+			// update filter
+			conn.removeMatchRule(filter) // remove old
+			if connCreated || filter != newFilter {
+				err = conn.insertMatchRule(newFilter)
+				if err != nil {
+					b.Error(err)
+					continue
+				}
+
+				filter = newFilter // changed
 			}
-			sigch = make(chan *dbus.Signal, 1024)
-			conn.Signal(sigch)
 
 		// get parameters of the block
 		case c := <-b.queryrule:
@@ -81,82 +97,147 @@ func (b *FromDBus) Run() {
 			}
 
 		// got message from D-Bus
-		case sig := <-sigch:
-			if sig == nil {
-				// ignore
-				continue
-			}
-			b.out <- map[string]interface{}{
-				"sender": sig.Sender,
-				"path":   string(sig.Path),
-				"name":   sig.Name,
-				"body":   sig.Body,
+		case sig := <-conn.signals:
+			if sig != nil {
+				// send it to the output
+				b.out <- map[string]interface{}{
+					"sender": sig.Sender,
+					"path":   string(sig.Path),
+					"name":   sig.Name,
+					"body":   sig.Body,
+				}
 			}
 
 		// quit the block
 		case <-b.quit:
-			// quit the block
-			if conn != nil && connNeedClose {
-				conn.Close() // TODO: report possible errors?
-				conn = nil
-			}
+			// TODO: report possible errors?
+			conn.removeAllMatchRules(true)
+			conn.close()
 			return
 		}
 	}
 }
 
-// openConn tries to open bus and adds corresponding filter
-func openConn(address, filter string) (conn *dbus.Conn, needClose bool, err error) {
-	// open corresponding bus
-	switch strings.ToLower(address) {
-	case "system":
-		conn, err = dbus.SystemBus()
-		if err != nil {
-			return
-		}
+// D-Bus helper connection
+type dbusConn struct {
+	dbus      *dbus.Conn
+	exclusive bool
 
-	case "session":
-		conn, err = dbus.SessionBus()
-		if err != nil {
-			return
-		}
+	matchRules map[string]bool
+	signals chan *dbus.Signal
+}
+
+// create new D-Bus helper connection
+func newDBusConn() (conn *dbusConn) {
+	conn = &dbusConn{}
+	conn.matchRules = map[string]bool{}
+	conn.signals = make(chan *dbus.Signal, 1024)
+	return
+}
+
+// isOpen() checks if D-Bus connection exists
+func (conn *dbusConn) isOpen() bool {
+	return conn.dbus != nil
+}
+
+// open() tries to open D-Bus connection
+func (conn *dbusConn) open(address string) (err error) {
+	switch strings.ToLower(address) {
+	case "@system", "system":
+		conn.dbus, err = dbus.SystemBus()
+		conn.exclusive = false
+
+	case "@session", "session":
+		conn.dbus, err = dbus.SessionBus()
+		conn.exclusive = false
 
 	default: // dial by address
-		conn, err = dbus.Dial(address)
+		conn.dbus, err = dbus.Dial(address)
+		conn.exclusive = true
 		if err != nil {
 			return
 		}
 
 		// authenticate
-		err = conn.Auth(nil)
+		err = conn.dbus.Auth(nil)
 		if err != nil {
-			conn.Close()
-			conn = nil
+			conn.dbus.Close()
+			conn.dbus = nil
 			return
 		}
 
 		// initialize
-		err = conn.Hello()
+		err = conn.dbus.Hello()
 		if err != nil {
-			conn.Close()
-			conn = nil
+			conn.dbus.Close()
+			conn.dbus = nil
 			return
 		}
-
-		// need to close custom connection
-		needClose = true
 	}
 
-	// add match
-	call := conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, filter)
-	err = call.Err
-	if err != nil {
-		if needClose {
-			conn.Close()
+	// watch for signals
+	if conn.dbus != nil && err == nil {
+		conn.dbus.Signal(conn.signals)
+	}
+
+	return
+}
+
+// close() closes the D-Bus connection
+func (conn *dbusConn) close() (err error) {
+	if conn.dbus != nil {
+		// TODO: delete signals from D-Bus connection!?
+		if conn.exclusive {
+			err = conn.dbus.Close()
 		}
-		conn = nil
-		return
+		conn.dbus = nil
 	}
 
-	return // OK
+	return
+}
+
+// insertMatchRule() adds match rule to the D-Bus object
+func (conn *dbusConn) insertMatchRule(rule string) (err error) {
+	// duplicates are not allowed
+	if conn.dbus != nil && !conn.matchRules[rule] {
+		call := conn.dbus.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule)
+		err = call.Err
+		if err == nil {
+			// add rule to the matchRules set
+			conn.matchRules[rule] = true
+		}
+	}
+
+	return
+}
+
+// removeMatchRule() removes match rule from the D-Bus object
+func (conn *dbusConn) removeMatchRule(rule string) (err error) {
+	if conn.dbus != nil && conn.matchRules[rule] {
+		call := conn.dbus.BusObject().Call("org.freedesktop.DBus.RemoveMatch", 0, rule)
+		err = call.Err
+		if err == nil {
+			// remove rule from the matchRules set
+			delete(conn.matchRules, rule)
+		}
+	}
+
+	return
+}
+
+// removeAllMatchRules() removes all installed match rules from the D-Bus object
+func (conn *dbusConn) removeAllMatchRules(force bool) (err error) {
+	for rule, _ := range conn.matchRules {
+		err = conn.removeMatchRule(rule)
+		if err != nil && !force {
+			break
+		}
+	}
+
+	if force {
+		// clear all rules anyway
+		conn.matchRules = map[string]bool{}
+	}
+
+	return
 }

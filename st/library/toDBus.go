@@ -32,11 +32,12 @@ func (b *ToDBus) Setup() {
 
 // Run is the block's main loop. Here we listen on the different channels we set up.
 func (b *ToDBus) Run() {
-	var conn = newDBusConn()
+	var conn = util.NewDBusConn()
 	var address = "@system"
-	var dest = "org.freedesktop.DBus"
-	var path = "/org/freedesktop/DBus"
-	var name = "org.freedesktop.DBus.Hello"
+	var dest = "org.freedesktop.Notifications"
+	var path = "/org/freedesktop/Notifications"
+	var name = "org.freedesktop.Notifications.Notify"
+	var signature = dbus.ParseSignatureMust("susssasa{sv}i")
 
 	for {
 		select {
@@ -70,16 +71,28 @@ func (b *ToDBus) Run() {
 				continue
 			}
 
+			// signature
+			sig, err := util.ParseString(msg, "Signature")
+			if err != nil {
+				b.Error(err)
+				continue
+			}
+			signature, err = dbus.ParseSignature(sig)
+			if err != nil {
+				b.Error(err)
+				continue
+			}
+
 			// open connection
-			if !conn.isOpen() || address != newAddress {
+			if !conn.IsOpen() || address != newAddress {
 				// close previous if need
-				if conn.isOpen() {
+				if conn.IsOpen() {
 					// TODO: report possible errors?
-					conn.close()
+					conn.Close()
 				}
 
 				// try to open new
-				err = conn.open(newAddress)
+				err = conn.Open(newAddress)
 				if err != nil {
 					b.Error(err)
 					continue
@@ -95,17 +108,25 @@ func (b *ToDBus) Run() {
 				"Destination": dest,
 				"Path":        path,
 				"MethodName":  name,
+				"Signature":   signature.String(),
 			}
 
 		// got new message
 		case msg := <-b.in:
-			if conn.isOpen() {
+			if conn.IsOpen() {
 				args, err := util.ParseArray(msg, "args")
 				if err != nil {
 					b.Error(err)
 					continue
 				}
-				obj := conn.dbus.Object(dest, dbus.ObjectPath(path))
+				args, err = util.DBusConv(signature, args...)
+				if err != nil {
+					b.Error(err)
+					continue
+				}
+
+				obj := conn.Object(dest, path)
+				//log.Printf("calling D-BUS method: %+v", args)
 				call := obj.Call(name, 0, args...)
 				if call.Err != nil {
 					b.Error(call.Err)
@@ -116,7 +137,7 @@ func (b *ToDBus) Run() {
 		// quit the block
 		case <-b.quit:
 			// TODO: report possible errors?
-			conn.close()
+			conn.Close()
 			return
 		}
 	}

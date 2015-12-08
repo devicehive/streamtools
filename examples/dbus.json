@@ -1,0 +1,28 @@
+{
+    "Blocks":[
+        {"Id":"3","Type":"tolog","Rule":null,"Position":{"X":368,"Y":224}},
+        {"Id":"4","Type":"toDBus","Rule":{
+                "BusName":"@session",
+                "Destination":"org.freedesktop.Notifications",
+                "MethodName":"org.freedesktop.Notifications.Notify",
+                "Path":"/org/freedesktop/Notifications",
+                "Signature":"susssasa{sv}i"
+            },"Position":{"X":223,"Y":288}},
+        {"Id":"8","Type":"fromDBus","Rule":{
+                "BusName":"@session",
+                "Filter":"type='signal',sender='org.freedesktop.Notifications'"
+            },"Position":{"X":335,"Y":98}},
+        {"Id":"1","Type":"ticker","Rule":{"Interval":"10s"},"Position":{"X":144,"Y":89}},
+        {"Id":"2","Type":"javascript","Rule":{
+                "MessageIn":"input",
+                "MessageOut":"output",
+                "Script":"output = {\n args:[\n  \"streamtools demo\",\n  0,\n  \"\",\n  \"streamtools Demo\",\n  \"Hello from streamtools!\\nvia D-Bus\",\n  [],\n  {},\n  2000\n ]\n}"
+            },"Position":{"X":185,"Y":195}}
+    ],
+    "Connections":[
+        {"Id":"9","FromId":"8","ToId":"3","ToRoute":"in"},
+        {"Id":"5","FromId":"1","ToId":"2","ToRoute":"in"},
+        {"Id":"7","FromId":"2","ToId":"4","ToRoute":"in"}
+    ]
+}
+

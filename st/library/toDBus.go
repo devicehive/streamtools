@@ -12,6 +12,7 @@ type ToDBus struct {
 	queryrule chan blocks.MsgChan
 	inrule    blocks.MsgChan
 	in        blocks.MsgChan
+	out       blocks.MsgChan
 	quit      blocks.MsgChan
 }
 
@@ -28,12 +29,13 @@ func (b *ToDBus) Setup() {
 	b.queryrule = b.QueryRoute("rule")
 	b.quit = b.Quit()
 	b.in = b.InRoute("in")
+	b.out = b.Broadcast()
 }
 
 // Run is the block's main loop. Here we listen on the different channels we set up.
 func (b *ToDBus) Run() {
 	var conn = util.NewDBusConn()
-	var address = "@system"
+	var address = "@session"
 	var dest = "org.freedesktop.Notifications"
 	var path = "/org/freedesktop/Notifications"
 	var name = "org.freedesktop.Notifications.Notify"
@@ -58,7 +60,7 @@ func (b *ToDBus) Run() {
 			}
 
 			// path
-			path, err = util.ParseString(msg, "Path")
+			path, err = util.ParseString(msg, "ObjectPath")
 			if err != nil {
 				b.Error(err)
 				continue
@@ -106,7 +108,7 @@ func (b *ToDBus) Run() {
 			c <- map[string]interface{}{
 				"BusName":     address,
 				"Destination": dest,
-				"Path":        path,
+				"ObjectPath":  path,
 				"MethodName":  name,
 				"Signature":   signature.String(),
 			}
@@ -114,23 +116,55 @@ func (b *ToDBus) Run() {
 		// got new message
 		case msg := <-b.in:
 			if conn.IsOpen() {
-				args, err := util.ParseArray(msg, "args")
+				// incomming message might override some main properties
+				var _sign = signature
+				var _dest = dest
+				var _path = path
+				var _name = name
+
+				if v, err := util.ParseString(msg, "Signature"); err == nil {
+					_sign, err = dbus.ParseSignature(v)
+					if err != nil {
+						b.Error(err)
+						continue
+					}
+				}
+				if v, err := util.ParseString(msg, "Destination"); err == nil {
+					_dest = v
+				}
+				if v, err := util.ParseString(msg, "ObjectPath"); err == nil {
+					_path = v
+				}
+				if v, err := util.ParseString(msg, "MethodName"); err == nil {
+					_name = v
+				}
+
+				args, err := util.ParseArray(msg, "args") // FIXME: rename to "Arguments"?
 				if err != nil {
 					b.Error(err)
 					continue
 				}
-				args, err = util.DBusConv(signature, args...)
+				args, err = util.DBusConv(_sign, args...)
 				if err != nil {
 					b.Error(err)
 					continue
 				}
 
-				obj := conn.Object(dest, path)
+				obj := conn.Object(_dest, _path)
 				//log.Printf("calling D-BUS method: %+v", args)
-				call := obj.Call(name, 0, args...)
+				call := obj.Call(_name, 0, args...)
 				if call.Err != nil {
 					b.Error(call.Err)
+					// send error to the output
+					b.out <- map[string]interface{}{
+						"error": call.Err,
+					}
 					continue
+				}
+
+				// send result to the output
+				b.out <- map[string]interface{}{
+					"result": call.Body,
 				}
 			}
 

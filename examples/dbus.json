@@ -5,7 +5,7 @@
                 "BusName":"@session",
                 "Destination":"org.freedesktop.Notifications",
                 "MethodName":"org.freedesktop.Notifications.Notify",
-                "Path":"/org/freedesktop/Notifications",
+                "ObjectPath":"/org/freedesktop/Notifications",
                 "Signature":"susssasa{sv}i"
             },"Position":{"X":223,"Y":288}},
         {"Id":"8","Type":"fromDBus","Rule":{
